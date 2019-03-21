@@ -1,20 +1,10 @@
+#! /usr/bin/env python3
+import argparse
 import datetime
 import json
 import requests
 
-access_token = "5e6d259d55ace50dc7f3b67c5c85a70cafa8d465"
-repo_name = "home-assistant"
-user = "home-assistant"
 
-per_page = 100
-years = range(2014, 2020)
-
-
-auth_header = "token %s" % (access_token)
-headers = {
-    'authorization': auth_header,
-    'accept': 'application/vnd.github.v3+json'
-}
 
 def parseLinkHeader(headers):
     """
@@ -30,62 +20,87 @@ def parseLinkHeader(headers):
             links[rel] = url
     return links
 
-commit_hash = {}
 
+def run_analysis(access_token, repo_name, user, start_year, end_year):
+    years = range(start_year, end_year + 1)
+    per_page = 100
 
-for year in years:
-    since = datetime.datetime(year, 1, 1)
-    until = datetime.datetime(year, 12, 31, 23, 59, 59)
-    since_str = since.isoformat()
-    until_str = until.isoformat()
-    url = "https://api.github.com/repos/%s/%s/commits" % (user, repo_name)
-    params = {
-        'since': since_str,
-        'until_str': until_str,
-        'per_page': per_page
+    auth_header = "token %s" % (access_token)
+    headers = {
+        'authorization': auth_header,
+        'accept': 'application/vnd.github.v3+json'
     }
-    
-    author_count = {}
-    while True:
-        try:
-            response = requests.get(url, params=params, headers=headers)
-            json_data = response.json()
 
-            for item in json_data:
-                if "author" not in item:
-                    continue
+    commit_hash = {}
 
-                author_obj = item["author"]
+    for year in years:
+        since = datetime.datetime(year, 1, 1)
+        until = datetime.datetime(year, 12, 31, 23, 59, 59)
+        since_str = since.isoformat()
+        until_str = until.isoformat()
+        url = "https://api.github.com/repos/%s/%s/commits" % (user, repo_name)
+        params = {
+            'since': since_str,
+            'until_str': until_str,
+            'per_page': per_page
+        }
+        
+        author_count = {}
+        while True:
+            try:
+                response = requests.get(url, params=params, headers=headers)
+                json_data = response.json()
 
-                if author_obj is None:
-                    continue
+                for item in json_data:
+                    if "author" not in item:
+                        continue
 
-                if "login" not in author_obj:
-                    continue
+                    author_obj = item["author"]
 
-                author = author_obj['login']
-                if author is None:
-                    continue
+                    if author_obj is None:
+                        continue
 
-                if author not in author_count:
-                    author_count[author] = 1
+                    if "login" not in author_obj:
+                        continue
+
+                    author = author_obj['login']
+                    if author is None:
+                        continue
+
+                    if author not in author_count:
+                        author_count[author] = 1
+                    else:
+                        author_count[author] += 1
+
+
+                # check if we can get more links
+                links = parseLinkHeader(response.headers)
+                if "next" not in links:
+                    break
                 else:
-                    author_count[author] += 1
-
-
-            # check if we can get more links
-            links = parseLinkHeader(response.headers)
-            if "next" not in links:
+                    url = links["next"]
+                    params = {}
+            except Exception as e:
+                print("Got error searching between %s and %s. Reason: %s Aborting!\n" % (since_str, until_str, str(e)))
                 break
-            else:
-                url = links["next"]
-                params = {}
-        except Exception as e:
-            print("Got error searching between %s and %s. Reason: %s Aborting!\n" % (since_str, until_str, str(e)))
-            break
 
-    commit_hash[year] = author_count
+        commit_hash[year] = author_count
 
-output_file = open("commit_analysis.json", "w")
-json.dump(commit_hash, output_file, indent=4)
-output_file.close()
+    output_file = open("commit_analysis.json", "w")
+    json.dump(commit_hash, output_file, indent=4)
+    output_file.close()
+
+    print("Analysis Complete")
+
+if __name__ == '__main__':
+    arg_parser = argparse.ArgumentParser(description='Run analysis on commits in a repo')
+
+    arg_parser.add_argument('--repo', required=True, dest='repo', type=str)
+    arg_parser.add_argument('--access_token', required=True, dest='access_token', type=str)
+    arg_parser.add_argument('--owner', required=True, dest='owner', type=str)
+    arg_parser.add_argument('--start_year', required=True, dest='start', type=int)
+    arg_parser.add_argument('--end_year', required=True, dest='end', type=int)
+
+    args = arg_parser.parse_args()
+
+    run_analysis(args.access_token, args.repo, args.owner, args.start, args.end)
